@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+
+import sys
+from difflib import SequenceMatcher
+from pathlib import Path
+
+
+def login(row):
+    if row.strip() and not row.lstrip().startswith((b"#", b"+", b"-")):
+        return row.partition(b":")[0]
+
+
+left, right = map(Path, sys.argv[1:])
+base = left.read_bytes().splitlines()
+names = [login(row) for row in base]
+present = set(names)
+incoming = {}
+for row in right.read_bytes().splitlines():
+    name = login(row)
+    if name:
+        incoming.setdefault(name, row)
+
+# These shared accounts appear in matching stretches of both files.
+aligned = {}
+matcher = SequenceMatcher(None, names, list(incoming), autojunk=False)
+for start, _, size in matcher.get_matching_blocks():
+    for pos in range(start, start + size):
+        aligned[names[pos]] = pos
+
+merged, pending = [], []
+cursor = 0
+after_move = False
+for name, row in incoming.items():
+    if name not in present:
+        pending.append(row)
+        continue
+    pos = aligned[name] if name in aligned else names.index(name)
+    if pos >= cursor and (name in aligned or (pending and after_move)):
+        merged.extend(base[cursor:pos])
+        merged.extend(pending)
+        pending.clear()
+        cursor = pos
+    if not pending:
+        after_move = name not in aligned
+
+for row in merged + base[cursor:] + pending:
+    sys.stdout.buffer.write(row + b"\n")
